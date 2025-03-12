@@ -166,7 +166,7 @@
                         if (response.success && response.file) {
                             // Aktualizacja nazwy pliku i linku do pobrania
                             $('#excel-filename').text(response.file);
-                            $('#download-link').attr('href', '/view/' + response.file);
+                            $('#download-link').attr('href', '/download/' + response.file);
                             
                             // Pokazanie sekcji wyniku
                             $('#column-selection').hide();
