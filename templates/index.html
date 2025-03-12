@@ -6,6 +6,8 @@
     <title>Konwerter PDF → Excel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -33,10 +35,16 @@
         </div>
 
         <div class="card" id="column-selection" style="display: none;">
-            <h2>Krok 2: Wybierz kolumny do konwersji</h2>
+            <h2>Krok 2: Wybierz i uporządkuj kolumny</h2>
             <p>Zaznacz kolumny, które chcesz uwzględnić w pliku Excel:</p>
             <div class="column-checkboxes" id="columns-container">
                 <!-- Tutaj dynamicznie dodawane będą checkboxy z kolumnami -->
+            </div>
+            <div class="sortable-columns-container">
+                <h3>Kolejność kolumn (przeciągnij i upuść):</h3>
+                <ul id="sortable-columns" class="sortable-list">
+                    <!-- Tu będą wyświetlane wybrane kolumny do sortowania -->
+                </ul>
             </div>
             <div class="button-group">
                 <button id="select-all" class="secondary-button">Zaznacz wszystkie</button>
@@ -81,6 +89,44 @@
                 $('#file-name').text(fileName ? fileName : 'Wybierz plik PDF');
             });
 
+            // Włączenie funkcji sortowania
+            $("#sortable-columns").sortable({
+                placeholder: "ui-state-highlight",
+                update: function(event, ui) {
+                    // Po każdej zmianie kolejności
+                    updateColumnOrder();
+                }
+            });
+
+            // Funkcja do aktualizacji listy kolumn do sortowania
+            function updateSortableList() {
+                // Czyszczenie listy
+                $('#sortable-columns').empty();
+                
+                // Dodawanie zaznaczonych kolumn do listy sortowania
+                $('.column-checkboxes input[type="checkbox"]:checked').each(function() {
+                    var columnName = $(this).val();
+                    var item = $('<li class="sortable-item" data-column="' + columnName + '">' +
+                                '<span class="drag-handle">☰</span> ' + columnName +
+                                '</li>');
+                    $('#sortable-columns').append(item);
+                });
+            }
+
+            // Funkcja do uzyskania aktualnej kolejności kolumn
+            function getColumnOrder() {
+                var columns = [];
+                $('#sortable-columns li').each(function() {
+                    columns.push($(this).data('column'));
+                });
+                return columns;
+            }
+
+            // Obsługa zmiany stanów checkboxów
+            $(document).on('change', '.column-checkboxes input[type="checkbox"]', function() {
+                updateSortableList();
+            });
+
             // Obsługa przesyłania pliku
             $('#upload-form').submit(function(e) {
                 e.preventDefault();
@@ -112,6 +158,9 @@
                                 $('#columns-container').append(checkbox);
                             });
                             
+                            // Inicjalizacja listy do sortowania
+                            updateSortableList();
+                            
                             // Pokazanie sekcji wyboru kolumn
                             $('#upload-card').hide();
                             $('#column-selection').show();
@@ -133,20 +182,19 @@
             // Obsługa przycisku "Zaznacz wszystkie"
             $('#select-all').click(function() {
                 $('.column-checkboxes input[type="checkbox"]').prop('checked', true);
+                updateSortableList();
             });
 
             // Obsługa przycisku "Odznacz wszystkie"
             $('#deselect-all').click(function() {
                 $('.column-checkboxes input[type="checkbox"]').prop('checked', false);
+                updateSortableList();
             });
 
             // Obsługa generowania pliku Excel
             $('#generate-excel').click(function() {
-                var selectedColumns = [];
-                
-                $('.column-checkboxes input[type="checkbox"]:checked').each(function() {
-                    selectedColumns.push($(this).val());
-                });
+                // Pobranie kolumn w odpowiedniej kolejności
+                var selectedColumns = getColumnOrder();
                 
                 if (selectedColumns.length === 0) {
                     alert('Wybierz przynajmniej jedną kolumnę');
