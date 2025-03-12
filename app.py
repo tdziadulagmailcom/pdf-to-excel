@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import pdfplumber
+import unicodedata
 from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
 
 app = Flask(__name__)
@@ -13,6 +14,22 @@ TEMP_FOLDER = "temp"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+def normalize_polish_chars(text):
+    """Zamienia polskie znaki na ich odpowiedniki bez znaków diakrytycznych"""
+    if not isinstance(text, str):
+        return text
+        
+    # Mapowanie polskich znaków na ich odpowiedniki bez znaków diakrytycznych
+    polish_map = {
+        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
+        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'
+    }
+    
+    for polish_char, latin_char in polish_map.items():
+        text = text.replace(polish_char, latin_char)
+    
+    return text
 
 def extract_tables_from_pdf(pdf_path):
     """Ekstrakcja tabel z PDF i identyfikacja dostępnych kolumn"""
@@ -57,8 +74,12 @@ def extract_tables_from_pdf(pdf_path):
                             df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
                             
                             # Normalizacja nazw kolumn (usuwanie białych znaków, etc.)
-                            df.columns = [str(col).strip() if col is not None else f"Kolumna_{i}" 
+                            df.columns = [normalize_polish_chars(str(col).strip()) if col is not None else f"Kolumna_{i}" 
                                          for i, col in enumerate(df.columns)]
+                            
+                            # Zastosowanie normalizacji polskich znaków dla wszystkich danych w DataFrame
+                            for col in df.columns:
+                                df[col] = df[col].apply(lambda x: normalize_polish_chars(x) if isinstance(x, str) else x)
                             
                             # Zapisujemy wszystkie znalezione kolumny
                             all_columns.update(df.columns)
