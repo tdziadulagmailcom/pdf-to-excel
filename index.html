@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Konwerter PDF → Excel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <h1>Konwertuj PDF na Excel (wybrane tabele)</h1>
+    <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="application/pdf" required>
+        <button type="submit">Prześlij i Konwertuj</button>
+    </form>
+    <p id="message"></p>
+
+    <script>
+        document.getElementById("upload-form").onsubmit = function(event) {
+            document.getElementById("message").innerText = "Przetwarzanie...";
+        };
+    </script>
+</body>
+</html>
