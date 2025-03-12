@@ -1,23 +1,24 @@
 import os
 import pandas as pd
 import pdfplumber
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
 
 app = Flask(__name__)
-app.secret_key = "tajny_klucz_do_flashow"  # Klucz do obsługi flash messages
+app.secret_key = "tajny_klucz_do_flashow"
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
+TEMP_FOLDER = "temp"
 
 # Tworzymy foldery, jeśli ich nie ma
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+os.makedirs(TEMP_FOLDER, exist_ok=True)
 
 def extract_tables_from_pdf(pdf_path):
-    """Ekstrakcja tabel z PDF i zapis do Excela z lepszą obsługą błędów i detekcją tabel"""
-    expected_columns = ["Data dokumentu", "Wn", "Ma"]
-    alternative_columns = ["Data", "Debet", "Kredyt"]  # Alternatywne nazwy kolumn
+    """Ekstrakcja tabel z PDF i identyfikacja dostępnych kolumn"""
     tables = []
     log_messages = []
+    all_columns = set()
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -38,14 +39,11 @@ def extract_tables_from_pdf(pdf_path):
                         # Konwersja do DataFrame
                         df = pd.DataFrame(table)
                         
-                        # Debugowanie pierwotnej tabeli
-                        log_messages.append(f"Strona {page_num}, Tabela {table_num}: Znaleziono tabelę z kolumnami: {df.iloc[0].tolist()}")
-                        
                         # Próba identyfikacji wiersza nagłówków
                         header_row = -1
                         for i, row in enumerate(df.iloc[:3].values):  # Sprawdzamy tylko pierwsze 3 wiersze
                             row_str = [str(cell).lower() if cell is not None else "" for cell in row]
-                            if any("data" in cell for cell in row_str):
+                            if any(keyword in " ".join(row_str) for keyword in ["data", "kod", "kwota", "nazwa", "numer"]):
                                 header_row = i
                                 break
                         
@@ -62,38 +60,11 @@ def extract_tables_from_pdf(pdf_path):
                             df.columns = [str(col).strip() if col is not None else f"Kolumna_{i}" 
                                          for i, col in enumerate(df.columns)]
                             
-                            # Sprawdzanie wymaganych kolumn z elastycznością
-                            # Sprawdzamy oryginalne i alternatywne nazwy kolumn
-                            if all(any(expected_col in str(col) for col in df.columns) for expected_col in ["Data", "Wn", "Ma"]) or \
-                               all(any(alt_col in str(col) for col in df.columns) for alt_col in ["Data", "Debet", "Kredyt"]):
-                                
-                                # Mapowanie kolumn
-                                column_mapping = {}
-                                for col in df.columns:
-                                    col_lower = str(col).lower()
-                                    if "data" in col_lower:
-                                        column_mapping[col] = "Data dokumentu"
-                                    elif any(debit in col_lower for debit in ["wn", "debet"]):
-                                        column_mapping[col] = "Wn"
-                                    elif any(credit in col_lower for credit in ["ma", "kredyt"]):
-                                        column_mapping[col] = "Ma"
-                                
-                                # Wybieramy tylko kolumny, które udało się zmapować
-                                if len(column_mapping) >= 3:
-                                    df = df.rename(columns=column_mapping)
-                                    selected_cols = ["Data dokumentu", "Wn", "Ma"]
-                                    # Sprawdzamy, czy wszystkie potrzebne kolumny są dostępne
-                                    missing_cols = [col for col in selected_cols if col not in df.columns]
-                                    for col in missing_cols:
-                                        df[col] = None  # Dodajemy brakujące kolumny jako puste
-                                    
-                                    df = df[selected_cols]
-                                    tables.append(df)
-                                    log_messages.append(f"Strona {page_num}, Tabela {table_num}: Dodano tabelę z {len(df)} wierszami")
-                                else:
-                                    log_messages.append(f"Strona {page_num}, Tabela {table_num}: Nie udało się zmapować wymaganych kolumn")
-                            else:
-                                log_messages.append(f"Strona {page_num}, Tabela {table_num}: Brak wymaganych kolumn")
+                            # Zapisujemy wszystkie znalezione kolumny
+                            all_columns.update(df.columns)
+                            
+                            tables.append(df)
+                            log_messages.append(f"Strona {page_num}, Tabela {table_num}: Znaleziono tabelę z kolumnami: {df.columns.tolist()}")
                         else:
                             log_messages.append(f"Strona {page_num}, Tabela {table_num}: Nie znaleziono nagłówków")
                             
@@ -101,29 +72,52 @@ def extract_tables_from_pdf(pdf_path):
                     log_messages.append(f"Błąd przetwarzania strony {page_num}: {str(e)}")
     
         if tables:
-            # Łączymy wszystkie znalezione tabele
-            result_df = pd.concat(tables, ignore_index=True)
+            # Przekształcamy listę unikalnych kolumn w listę
+            all_columns_list = sorted(list(all_columns))
             
-            # Czyszczenie danych
-            # Usuwamy wiersze, które mogą być nieprawidłowe (np. sumy, podtytuly)
-            result_df = result_df[result_df["Data dokumentu"].notna()]
-            result_df = result_df[result_df["Data dokumentu"].astype(str).str.contains(r'\d')]
+            # Zapisujemy znalezione tabele do pliku tymczasowego
+            temp_df = pd.concat(tables, ignore_index=True)
+            temp_path = os.path.join(TEMP_FOLDER, "temp_data.pkl")
+            temp_df.to_pickle(temp_path)
             
             # Zapisujemy także log
-            log_path = os.path.join(OUTPUT_FOLDER, "log_konwersji.txt")
+            log_path = os.path.join(TEMP_FOLDER, "log_konwersji.txt")
             with open(log_path, "w", encoding="utf-8") as log_file:
                 log_file.write("\n".join(log_messages))
             
-            # Zapisujemy wynik
-            output_path = os.path.join(OUTPUT_FOLDER, "raport_kasowy.xlsx")
-            result_df.to_excel(output_path, index=False)
-            return output_path, log_path, "\n".join(log_messages)
+            return all_columns_list, temp_path, "\n".join(log_messages)
         
-        return None, None, "\n".join(log_messages)
+        return [], None, "\n".join(log_messages)
     
     except Exception as e:
         error_message = f"Wystąpił błąd podczas przetwarzania pliku: {str(e)}"
-        return None, None, error_message
+        return [], None, error_message
+
+def generate_excel_from_selection(temp_path, selected_columns, filename):
+    """Generuje plik Excel na podstawie wybranych kolumn"""
+    try:
+        # Wczytanie tymczasowego pliku
+        df = pd.read_pickle(temp_path)
+        
+        # Filtrowanie tylko wybranych kolumn (jeśli istnieją w DataFrame)
+        valid_columns = [col for col in selected_columns if col in df.columns]
+        
+        if not valid_columns:
+            return None, "Nie wybrano żadnych prawidłowych kolumn"
+        
+        df_selected = df[valid_columns]
+        
+        # Usuwanie wierszy, które są całkowicie puste
+        df_selected = df_selected.dropna(how='all')
+        
+        # Zapisanie do pliku Excel
+        output_path = os.path.join(OUTPUT_FOLDER, filename)
+        df_selected.to_excel(output_path, index=False)
+        
+        return output_path, None
+    
+    except Exception as e:
+        return None, f"Wystąpił błąd podczas generowania pliku Excel: {str(e)}"
 
 @app.route("/")
 def index():
@@ -132,28 +126,79 @@ def index():
 @app.route("/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
-        flash("Nie wybrano pliku")
-        return redirect(url_for("index"))
+        return jsonify({"error": "Nie wybrano pliku"}), 400
         
     file = request.files["file"]
     
     if file.filename == "":
-        flash("Nie wybrano pliku")
-        return redirect(url_for("index"))
+        return jsonify({"error": "Nie wybrano pliku"}), 400
         
     if file and file.filename.lower().endswith(".pdf"):
         file_path = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(file_path)
 
-        excel_path, log_path, log_messages = extract_tables_from_pdf(file_path)
+        available_columns, temp_path, log_messages = extract_tables_from_pdf(file_path)
         
-        if excel_path:
-            # Opcjonalnie można też udostępnić log
-            return send_file(excel_path, as_attachment=True)
+        if available_columns and temp_path:
+            # Zapisujemy informacje w sesji
+            session['temp_path'] = temp_path
+            session['filename'] = file.filename.replace('.pdf', '.xlsx')
+            
+            return jsonify({
+                "success": True,
+                "columns": available_columns,
+                "message": f"Znaleziono {len(available_columns)} kolumn w pliku PDF"
+            })
         else:
-            return render_template("index.html", error=True, error_message="Nie znaleziono odpowiednich tabel w pliku PDF. Szczegóły błędu:\n" + log_messages)
+            return jsonify({
+                "error": True,
+                "message": "Nie znaleziono odpowiednich tabel w pliku PDF. Szczegóły błędu:\n" + log_messages
+            }), 400
     else:
-        return render_template("index.html", error=True, error_message="Wybierz prawidłowy plik PDF")
+        return jsonify({
+            "error": True,
+            "message": "Wybierz prawidłowy plik PDF"
+        }), 400
+
+@app.route("/generate", methods=["POST"])
+def generate_excel():
+    # Sprawdzamy, czy mamy zapisane dane sesji
+    if 'temp_path' not in session or 'filename' not in session:
+        return jsonify({"error": "Sesja wygasła. Proszę przesłać plik ponownie."}), 400
+    
+    # Pobieramy wybrane kolumny
+    data = request.get_json()
+    if not data or 'columns' not in data or not data['columns']:
+        return jsonify({"error": "Nie wybrano żadnych kolumn"}), 400
+    
+    selected_columns = data['columns']
+    temp_path = session['temp_path']
+    filename = session['filename']
+    
+    # Generujemy plik Excel
+    excel_path, error = generate_excel_from_selection(temp_path, selected_columns, filename)
+    
+    if excel_path:
+        # Zwracamy ścieżkę do pliku, który będzie dostępny do pobrania
+        return jsonify({
+            "success": True,
+            "file": os.path.basename(excel_path),
+            "message": "Plik Excel został wygenerowany pomyślnie"
+        })
+    else:
+        return jsonify({
+            "error": True,
+            "message": error
+        }), 400
+
+@app.route("/download/<filename>")
+def download_file(filename):
+    return send_file(os.path.join(OUTPUT_FOLDER, filename), as_attachment=True)
+
+@app.route("/view/<filename>")
+def view_file(filename):
+    # Ta funkcja tylko renderuje stronę z linkiem do pliku
+    return render_template("view.html", filename=filename)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
