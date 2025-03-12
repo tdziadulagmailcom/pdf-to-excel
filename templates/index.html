@@ -12,11 +12,21 @@
         <input type="file" name="file" accept="application/pdf" required>
         <button type="submit">Prześlij i Konwertuj</button>
     </form>
-    <p id="message"></p>
+    <div id="loading" style="display: none;">
+        <p>Przetwarzanie... Proszę czekać.</p>
+        <div class="spinner"></div>
+    </div>
+    
+    {% if error %}
+    <div class="error-box">
+        <h3>Wystąpił błąd:</h3>
+        <pre>{{ error_message }}</pre>
+    </div>
+    {% endif %}
 
     <script>
         document.getElementById("upload-form").onsubmit = function(event) {
-            document.getElementById("message").innerText = "Przetwarzanie...";
+            document.getElementById("loading").style.display = "block";
         };
     </script>
 </body>
