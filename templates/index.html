@@ -5,29 +5,197 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Konwerter PDF → Excel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
-    <h1>Konwertuj PDF na Excel (wybrane tabele)</h1>
-    <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept="application/pdf" required>
-        <button type="submit">Prześlij i Konwertuj</button>
-    </form>
-    <div id="loading" style="display: none;">
-        <p>Przetwarzanie... Proszę czekać.</p>
-        <div class="spinner"></div>
+    <div class="container">
+        <header>
+            <h1>Konwerter PDF na Excel</h1>
+            <p class="subtitle">Narzędzie do wyodrębniania tabel z plików PDF</p>
+        </header>
+
+        <div class="card" id="upload-card">
+            <h2>Krok 1: Wybierz plik PDF</h2>
+            <form id="upload-form" enctype="multipart/form-data">
+                <div class="file-input-container">
+                    <input type="file" name="file" id="file-input" accept="application/pdf" required>
+                    <label for="file-input" class="custom-file-input">
+                        <span id="file-name">Wybierz plik PDF</span>
+                    </label>
+                </div>
+                <button type="submit" class="primary-button">Prześlij plik</button>
+            </form>
+            <div id="loading" style="display: none;">
+                <p>Analizowanie pliku PDF... Proszę czekać.</p>
+                <div class="spinner"></div>
+            </div>
+            <div id="error-message" class="error-box" style="display: none;"></div>
+        </div>
+
+        <div class="card" id="column-selection" style="display: none;">
+            <h2>Krok 2: Wybierz kolumny do konwersji</h2>
+            <p>Zaznacz kolumny, które chcesz uwzględnić w pliku Excel:</p>
+            <div class="column-checkboxes" id="columns-container">
+                <!-- Tutaj dynamicznie dodawane będą checkboxy z kolumnami -->
+            </div>
+            <div class="button-group">
+                <button id="select-all" class="secondary-button">Zaznacz wszystkie</button>
+                <button id="deselect-all" class="secondary-button">Odznacz wszystkie</button>
+                <button id="generate-excel" class="primary-button">Generuj Excel</button>
+            </div>
+            <div id="generation-loading" style="display: none;">
+                <p>Generowanie pliku Excel... Proszę czekać.</p>
+                <div class="spinner"></div>
+            </div>
+        </div>
+
+        <div class="card" id="result-card" style="display: none;">
+            <h2>Krok 3: Pobierz plik Excel</h2>
+            <p>Twój plik Excel jest gotowy do pobrania:</p>
+            <div class="excel-file-container">
+                <div class="excel-icon">
+                    <svg viewBox="0 0 24 24" width="48" height="48">
+                        <path fill="#217346" d="M21.5,2H11.75C11.336,2,11,2.336,11,2.75V5h10v3h-10v2h10v3h-10v2h10v3h-10v2.25 C11,21.664,11.336,22,11.75,22H21.5c0.552,0,1-0.448,1-1V3C22.5,2.448,22.052,2,21.5,2z"/>
+                        <path fill="#217346" d="M10,17.75v-12.5C10,4.56,9.44,4,8.75,4H6c-0.55,0-1,0.45-1,1v5H1c-0.55,0-1,0.45-1,1v2 c0,0.55,0.45,1,1,1h4v5c0,0.55,0.45,1,1,1h2.75C9.44,20,10,19.44,10,18.75z"/>
+                    </svg>
+                </div>
+                <div class="excel-file-info">
+                    <span id="excel-filename">plik.xlsx</span>
+                    <a id="download-link" class="primary-button" href="#">Pobierz plik</a>
+                </div>
+            </div>
+            <p class="note">Możesz także rozpocząć nową konwersję:</p>
+            <button id="restart" class="secondary-button">Nowa konwersja</button>
+        </div>
     </div>
-    
-    {% if error %}
-    <div class="error-box">
-        <h3>Wystąpił błąd:</h3>
-        <pre>{{ error_message }}</pre>
-    </div>
-    {% endif %}
+
+    <footer>
+        <p>PDF do Excel Konwerter &copy; 2025 | Wszystkie prawa zastrzeżone</p>
+    </footer>
 
     <script>
-        document.getElementById("upload-form").onsubmit = function(event) {
-            document.getElementById("loading").style.display = "block";
-        };
+        $(document).ready(function() {
+            // Aktualizacja nazwy wybranego pliku
+            $('#file-input').change(function() {
+                var fileName = $(this).val().split('\\').pop();
+                $('#file-name').text(fileName ? fileName : 'Wybierz plik PDF');
+            });
+
+            // Obsługa przesyłania pliku
+            $('#upload-form').submit(function(e) {
+                e.preventDefault();
+                $('#loading').show();
+                $('#error-message').hide();
+
+                var formData = new FormData(this);
+                
+                $.ajax({
+                    url: '/upload',
+                    type: 'POST',
+                    data: formData,
+                    cache: false,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#loading').hide();
+                        
+                        if (response.columns && response.columns.length > 0) {
+                            // Czyszczenie poprzednich checkboxów
+                            $('#columns-container').empty();
+                            
+                            // Dodawanie nowych checkboxów dla każdej kolumny
+                            $.each(response.columns, function(i, column) {
+                                var checkbox = $('<div class="checkbox-item">' +
+                                    '<input type="checkbox" id="col-' + i + '" value="' + column + '" checked>' +
+                                    '<label for="col-' + i + '">' + column + '</label>' +
+                                '</div>');
+                                $('#columns-container').append(checkbox);
+                            });
+                            
+                            // Pokazanie sekcji wyboru kolumn
+                            $('#upload-card').hide();
+                            $('#column-selection').show();
+                        } else {
+                            $('#error-message').text('Nie znaleziono żadnych kolumn w pliku PDF').show();
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#loading').hide();
+                        var errorMsg = 'Wystąpił błąd podczas przesyłania pliku';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMsg = xhr.responseJSON.message;
+                        }
+                        $('#error-message').text(errorMsg).show();
+                    }
+                });
+            });
+
+            // Obsługa przycisku "Zaznacz wszystkie"
+            $('#select-all').click(function() {
+                $('.column-checkboxes input[type="checkbox"]').prop('checked', true);
+            });
+
+            // Obsługa przycisku "Odznacz wszystkie"
+            $('#deselect-all').click(function() {
+                $('.column-checkboxes input[type="checkbox"]').prop('checked', false);
+            });
+
+            // Obsługa generowania pliku Excel
+            $('#generate-excel').click(function() {
+                var selectedColumns = [];
+                
+                $('.column-checkboxes input[type="checkbox"]:checked').each(function() {
+                    selectedColumns.push($(this).val());
+                });
+                
+                if (selectedColumns.length === 0) {
+                    alert('Wybierz przynajmniej jedną kolumnę');
+                    return;
+                }
+                
+                $('#generation-loading').show();
+                
+                $.ajax({
+                    url: '/generate',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ columns: selectedColumns }),
+                    success: function(response) {
+                        $('#generation-loading').hide();
+                        
+                        if (response.success && response.file) {
+                            // Aktualizacja nazwy pliku i linku do pobrania
+                            $('#excel-filename').text(response.file);
+                            $('#download-link').attr('href', '/view/' + response.file);
+                            
+                            // Pokazanie sekcji wyniku
+                            $('#column-selection').hide();
+                            $('#result-card').show();
+                        } else {
+                            alert('Wystąpił błąd podczas generowania pliku Excel');
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#generation-loading').hide();
+                        var errorMsg = 'Wystąpił błąd podczas generowania pliku Excel';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMsg = xhr.responseJSON.message;
+                        }
+                        alert(errorMsg);
+                    }
+                });
+            });
+
+            // Obsługa przycisku "Nowa konwersja"
+            $('#restart').click(function() {
+                // Reset formularza i widoków
+                $('#upload-form')[0].reset();
+                $('#file-name').text('Wybierz plik PDF');
+                $('#error-message').hide();
+                $('#result-card').hide();
+                $('#upload-card').show();
+            });
+        });
     </script>
 </body>
 </html>
