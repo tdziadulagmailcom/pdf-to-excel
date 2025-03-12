@@ -1,7 +1,7 @@
-from flask import Flask, render_template, request, send_file
 import os
 import pandas as pd
 import pdfplumber
+from flask import Flask, render_template, request, send_file
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -12,8 +12,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 def extract_tables_from_pdf(pdf_path):
-    """Funkcja ekstrakcji tabel z PDF i zapisania ich do Excela"""
-    selected_columns = ["Data dokumentu", "Wn", "Ma"]
+    """Ekstrakcja tabel z PDF i zapis do Excela z obsługą błędów"""
+    expected_columns = ["Data dokumentu", "Wn", "Ma"]
     tables = []
 
     with pdfplumber.open(pdf_path) as pdf:
@@ -21,12 +21,21 @@ def extract_tables_from_pdf(pdf_path):
             extracted_tables = page.extract_tables()
             for table in extracted_tables:
                 df = pd.DataFrame(table)
-                # Sprawdzamy, czy tabela zawiera wymagane kolumny
+
+                # Sprawdzamy, czy pierwszy wiersz wygląda na nagłówki
                 if not df.empty and any("Data" in str(cell) for cell in df.iloc[0]):
-                    df.columns = df.iloc[0]  # Pierwszy wiersz jako nagłówki
-                    df = df[1:]  # Usunięcie nagłówka z danych
-                    df = df[selected_columns]  # Wybór odpowiednich kolumn
-                    tables.append(df)
+                    df.columns = df.iloc[0]  # Ustawienie pierwszego wiersza jako nagłówki
+                    df = df[1:]  # Usunięcie wiersza nagłówków z danych
+
+                    # Usunięcie pustych kolumn i wierszy
+                    df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
+
+                    # Sprawdzenie, czy zawiera wymagane kolumny
+                    if all(col in df.columns for col in expected_columns):
+                        df = df[expected_columns]  # Wybór tylko wymaganych kolumn
+                        tables.append(df)
+                    else:
+                        print(f"⚠️ Pominięto stronę, brak wymaganych kolumn: {df.columns}")
 
     if tables:
         result_df = pd.concat(tables, ignore_index=True)
